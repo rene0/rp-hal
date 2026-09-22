@@ -388,6 +388,7 @@ macro_rules! impl_alarm {
                 })
             }
         }
+
         impl Alarm for $name {
             /// Clear the interrupt flag. This should be called after interrupt `
             #[doc = $int_name]
