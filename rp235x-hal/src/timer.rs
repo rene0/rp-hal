@@ -11,6 +11,8 @@
 use core::sync::atomic::{AtomicU8, Ordering};
 use fugit::{MicrosDurationU32, MicrosDurationU64, WrappingTimerInstantU64};
 
+#[cfg(feature = "rtic-monotonic")]
+use crate::timer::monotonic::MTInstant;
 use crate::{
     atomic_register_access::{write_bitmask_clear, write_bitmask_set},
     clocks::ClocksManager,
@@ -381,6 +383,10 @@ pub trait Alarm: Sealed {
     /// [enable_interrupt]: #method.enable_interrupt
     fn schedule(&mut self, countdown: MicrosDurationU32) -> Result<(), ScheduleAlarmError>;
 
+    /// Like `schedule_at()` but for monotonic instants.
+    #[cfg(feature = "rtic-monotonic")]
+    fn schedule_at_monotonic(&mut self, timestamp: MTInstant) -> Result<(), ScheduleAlarmError>;
+
     /// Schedule the alarm to be finished at the given timestamp. If [enable_interrupt] is
     /// called, this will trigger interrupt whenever this timestamp is reached.
     ///
@@ -424,6 +430,40 @@ macro_rules! impl_alarm {
                     if now.is_after(timestamp)
                         && (timer.armed().read().bits() & $armed_bit_mask) != 0
                     {
+                        // timestamp was set to a value in the past
+
+                        // safety: TIMER.armed is a write-clear register, and there can only be
+                        // 1 instance of AlarmN so we can safely atomically clear this bit.
+                        unsafe {
+                            timer.armed().write_with_zero(|w| w.bits($armed_bit_mask));
+                            crate::atomic_register_access::write_bitmask_set(
+                                timer.intf().as_ptr(),
+                                $armed_bit_mask,
+                            );
+                        }
+                    }
+                    Ok(())
+                })
+            }
+
+            #[cfg(feature = "rtic-monotonic")]
+            fn schedule_internal_monotonic(
+                &mut self,
+                timestamp: MTInstant,
+            ) -> Result<(), ScheduleAlarmError> {
+                let timestamp_low = (timestamp.as_ticks() & 0xFFFF_FFFF) as u32;
+                let timer = D::get_perif();
+
+                // This lock is for time-criticality
+                crate::arch::interrupt_free(|| {
+                    let alarm = timer.$timer_alarm();
+
+                    // safety: This is the only code in the codebase that accesses memory address $timer_alarm
+                    alarm.write(|w| unsafe { w.bits(timestamp_low) });
+
+                    // If it is not set, it has already triggered.
+                    let now = MTInstant::from_ticks(get_timestamp::<D>());
+                    if now > timestamp && (timer.armed().read().bits() & $armed_bit_mask) != 0 {
                         // timestamp was set to a value in the past
 
                         // safety: TIMER.armed is a write-clear register, and there can only be
@@ -525,6 +565,21 @@ macro_rules! impl_alarm {
                 }
 
                 self.schedule_internal(timestamp)
+            }
+
+            /// Like `schedule_at()` but for monotonic instants.
+            #[cfg(feature = "rtic-monotonic")]
+            fn schedule_at_monotonic(
+                &mut self,
+                timestamp: MTInstant,
+            ) -> Result<(), ScheduleAlarmError> {
+                let now = MTInstant::from_ticks(get_timestamp::<D>());
+                let duration = timestamp.as_ticks().saturating_sub(now.as_ticks());
+                if duration > u32::MAX.into() {
+                    return Err(ScheduleAlarmError::AlarmTooLate);
+                }
+
+                self.schedule_internal_monotonic(timestamp)
             }
 
             /// Return true if this alarm is finished. The returned value is undefined if the alarm
@@ -635,7 +690,7 @@ pub mod monotonic {
             let wake_at = core::cmp::min(instant, max_instant);
 
             // Cannot fail
-            let _ = self.1.schedule_at(wake_at);
+            let _ = self.1.schedule_at_monotonic(wake_at);
             self.1.enable_interrupt();
         }
 
