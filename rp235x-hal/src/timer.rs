@@ -19,8 +19,12 @@ use crate::{
     typelevel::Sealed,
 };
 
+/// Legacy name for backwards compatibility
+#[deprecated(note = "please use WrappingInstant instead")]
+pub type Instant = WrappingInstant;
+
 /// Instant type used by the Timer & Alarm methods.
-pub type Instant = WrappingTimerInstantU64<1_000_000>;
+pub type WrappingInstant = WrappingTimerInstantU64<1_000_000>;
 
 #[cfg(feature = "rtic-monotonic")]
 use fugit::MonotonicTimerInstantU64;
@@ -163,7 +167,7 @@ where
     D: TimerDevice,
 {
     /// Get the current counter value.
-    pub fn get_counter(&self) -> Instant {
+    pub fn get_counter(&self) -> WrappingInstant {
         WrappingTimerInstantU64::from_ticks(get_timestamp::<D>())
     }
 
@@ -401,7 +405,7 @@ pub trait Alarm: Sealed {
     /// `u32::MAX` microseconds.
     ///
     /// [enable_interrupt]: #method.enable_interrupt
-    fn schedule_at(&mut self, timestamp: Instant) -> Result<(), ScheduleAlarmError>;
+    fn schedule_at(&mut self, timestamp: WrappingInstant) -> Result<(), ScheduleAlarmError>;
 
     /// Return true if this alarm is finished. The returned value is undefined if the alarm
     /// has not been scheduled yet.
@@ -421,7 +425,10 @@ macro_rules! impl_alarm {
         where
             D: TimerDevice,
         {
-            fn schedule_internal(&mut self, timestamp: Instant) -> Result<(), ScheduleAlarmError> {
+            fn schedule_internal(
+                &mut self,
+                timestamp: WrappingInstant,
+            ) -> Result<(), ScheduleAlarmError> {
                 let timestamp_low = (timestamp.as_ticks() & 0xFFFF_FFFF) as u32;
                 let timer = D::get_perif();
 
@@ -564,7 +571,10 @@ macro_rules! impl_alarm {
             /// `u32::MAX` microseconds.
             ///
             /// [enable_interrupt]: #method.enable_interrupt
-            fn schedule_at(&mut self, timestamp: Instant) -> Result<(), ScheduleAlarmError> {
+            fn schedule_at(
+                &mut self,
+                timestamp: WrappingInstant,
+            ) -> Result<(), ScheduleAlarmError> {
                 let now = self.0.get_counter();
                 let duration = timestamp.as_ticks().saturating_sub(now.as_ticks());
                 if duration > u32::MAX.into() {

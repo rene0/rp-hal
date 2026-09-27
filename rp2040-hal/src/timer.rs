@@ -19,8 +19,12 @@ use crate::{
     typelevel::Sealed,
 };
 
+/// Legacy name for backwards compatibility
+#[deprecated(note = "please use WrappingInstant instead")]
+pub type Instant = WrappingInstant;
+
 /// Instant type used by the Timer & Alarm methods.
-pub type Instant = WrappingTimerInstantU64<1_000_000>;
+pub type WrappingInstant = WrappingTimerInstantU64<1_000_000>;
 
 #[cfg(feature = "rtic-monotonic")]
 use fugit::MonotonicTimerInstantU64;
@@ -87,7 +91,7 @@ impl Timer {
     }
 
     /// Get the current counter value.
-    pub fn get_counter(&self) -> Instant {
+    pub fn get_counter(&self) -> WrappingInstant {
         WrappingTimerInstantU64::from_ticks(get_timestamp())
     }
 
@@ -305,7 +309,7 @@ pub trait Alarm: Sealed {
     /// `u32::MAX` microseconds.
     ///
     /// [enable_interrupt]: #method.enable_interrupt
-    fn schedule_at(&mut self, timestamp: Instant) -> Result<(), ScheduleAlarmError>;
+    fn schedule_at(&mut self, timestamp: WrappingInstant) -> Result<(), ScheduleAlarmError>;
 
     /// Like `schedule_at()` but for monotonic instants.
     #[cfg(feature = "rtic-monotonic")]
@@ -327,7 +331,10 @@ macro_rules! impl_alarm {
         /// An alarm that can be used to schedule events in the future. Alarms can also be configured to trigger interrupts.
         pub struct $name(Timer);
         impl $name {
-            fn schedule_internal(&mut self, timestamp: Instant) -> Result<(), ScheduleAlarmError> {
+            fn schedule_internal(
+                &mut self,
+                timestamp: WrappingInstant,
+            ) -> Result<(), ScheduleAlarmError> {
                 let timestamp_low = (timestamp.as_ticks() & 0xFFFF_FFFF) as u32;
                 // Safety: Only used to access bits belonging exclusively to this alarm
                 let timer = unsafe { &*pac::TIMER::PTR };
@@ -469,7 +476,10 @@ macro_rules! impl_alarm {
             /// `u32::MAX` microseconds.
             ///
             /// [enable_interrupt]: #method.enable_interrupt
-            fn schedule_at(&mut self, timestamp: Instant) -> Result<(), ScheduleAlarmError> {
+            fn schedule_at(
+                &mut self,
+                timestamp: WrappingInstant,
+            ) -> Result<(), ScheduleAlarmError> {
                 let now = self.0.get_counter();
                 let duration = timestamp.as_ticks().saturating_sub(now.as_ticks());
                 if duration > u32::MAX.into() {
