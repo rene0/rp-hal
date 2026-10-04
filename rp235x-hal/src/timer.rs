@@ -597,6 +597,7 @@ impl_alarm!(Alarm3 {
 });
 
 /// Support for RTIC monotonic trait.
+#[cfg(feature = "rtic-monotonic")]
 pub mod monotonic {
     use super::{Alarm, Instant, Timer, TimerDevice};
     use fugit::ExtU32;

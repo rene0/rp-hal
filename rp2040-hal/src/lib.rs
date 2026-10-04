@@ -30,6 +30,9 @@
 //!   to be taken out of reset before calling `UsbBus::new`**.
 //!   Using `let pins = Pins::new(peripherals.IO_BANK0, peripherals.PADS_BANK0, sio.gpio_bank0, &mut peripherals.RESETS);`
 //!   is enough to take the Bank 0 out of reset.
+//! * **rtic-monotonic** -
+//!   Implement
+//!   `rtic_monotonic::Monotonic` based on the RP2040 timer peripheral
 //! * **i2c-write-iter** -
 //!   Implement `i2c_write_iter` traits for `I2C<_, _, Controller>`.
 //! * **binary-info** -
