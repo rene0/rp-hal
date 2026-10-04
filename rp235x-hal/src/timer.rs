@@ -9,7 +9,7 @@
 //! See [Section 12.8](https://rptl.io/rp2350-datasheet) of the datasheet for more details.
 
 use core::sync::atomic::{AtomicU8, Ordering};
-use fugit::{MicrosDurationU32, MicrosDurationU64};
+use fugit::{MicrosDurationU32, MicrosDurationU64, MonotonicTimerInstantU64};
 
 use crate::{
     atomic_register_access::{write_bitmask_clear, write_bitmask_set},
@@ -19,12 +19,8 @@ use crate::{
     typelevel::Sealed,
 };
 
-/// Placeholder
-pub type Instant = MonotonicInstant;
-
-use fugit::MonotonicTimerInstantU64;
-/// Monotonic instant type used by the Timer & Alarm methods.
-pub type MonotonicInstant = MonotonicTimerInstantU64<1_000_000>;
+/// Instant type used by the Timer & Alarm methods.
+pub type Instant = MonotonicTimerInstantU64<1_000_000>;
 
 static ALARMS_TIMER0: AtomicU8 = AtomicU8::new(0x00);
 static ALARMS_TIMER1: AtomicU8 = AtomicU8::new(0x00);
@@ -161,7 +157,7 @@ where
     D: TimerDevice,
 {
     /// Get the current counter value.
-    pub fn get_counter(&self) -> MonotonicInstant {
+    pub fn get_counter(&self) -> Instant {
         MonotonicTimerInstantU64::from_ticks(get_timestamp::<D>())
     }
 
@@ -392,7 +388,7 @@ pub trait Alarm: Sealed {
     /// `u32::MAX` microseconds.
     ///
     /// [enable_interrupt]: #method.enable_interrupt
-    fn schedule_at(&mut self, timestamp: MonotonicInstant) -> Result<(), ScheduleAlarmError>;
+    fn schedule_at(&mut self, timestamp: Instant) -> Result<(), ScheduleAlarmError>;
 
     /// Return true if this alarm is finished. The returned value is undefined if the alarm
     /// has not been scheduled yet.
@@ -412,10 +408,7 @@ macro_rules! impl_alarm {
         where
             D: TimerDevice,
         {
-            fn schedule_internal(
-                &mut self,
-                timestamp: MonotonicInstant,
-            ) -> Result<(), ScheduleAlarmError> {
+            fn schedule_internal(&mut self, timestamp: Instant) -> Result<(), ScheduleAlarmError> {
                 let timestamp_low = (timestamp.as_ticks() & 0xFFFF_FFFF) as u32;
                 let timer = D::get_perif();
 
@@ -427,7 +420,7 @@ macro_rules! impl_alarm {
                     alarm.write(|w| unsafe { w.bits(timestamp_low) });
 
                     // If it is not set, it has already triggered.
-                    let now = MonotonicInstant::from_ticks(get_timestamp::<D>());
+                    let now = Instant::from_ticks(get_timestamp::<D>());
                     if now > timestamp && (timer.armed().read().bits() & $armed_bit_mask) != 0 {
                         // timestamp was set to a value in the past
 
@@ -522,11 +515,8 @@ macro_rules! impl_alarm {
             /// `u32::MAX` microseconds.
             ///
             /// [enable_interrupt]: #method.enable_interrupt
-            fn schedule_at(
-                &mut self,
-                timestamp: MonotonicInstant,
-            ) -> Result<(), ScheduleAlarmError> {
-                let now = MonotonicInstant::from_ticks(get_timestamp::<D>());
+            fn schedule_at(&mut self, timestamp: Instant) -> Result<(), ScheduleAlarmError> {
+                let now = Instant::from_ticks(get_timestamp::<D>());
                 let duration = timestamp.as_ticks().saturating_sub(now.as_ticks());
                 if duration > u32::MAX.into() {
                     return Err(ScheduleAlarmError::AlarmTooLate);
@@ -612,7 +602,7 @@ impl_alarm!(Alarm3 {
 
 /// Support for RTIC monotonic trait.
 pub mod monotonic {
-    use super::{get_timestamp, Alarm, MonotonicInstant, Timer, TimerDevice};
+    use super::{get_timestamp, Alarm, Instant, Timer, TimerDevice};
     use fugit::ExtU32;
 
     /// RTIC Monotonic Implementation
@@ -625,16 +615,16 @@ pub mod monotonic {
         }
     }
     impl<D: TimerDevice, A: Alarm> rtic_monotonic::Monotonic for Monotonic<D, A> {
-        type Instant = MonotonicInstant;
+        type Instant = Instant;
         type Duration = fugit::MicrosDurationU64;
 
         const DISABLE_INTERRUPT_ON_EMPTY_QUEUE: bool = false;
 
-        fn now(&mut self) -> MonotonicInstant {
-            MonotonicInstant::from_ticks(get_timestamp::<D>())
+        fn now(&mut self) -> Instant {
+            Instant::from_ticks(get_timestamp::<D>())
         }
 
-        fn set_compare(&mut self, instant: MonotonicInstant) {
+        fn set_compare(&mut self, instant: Instant) {
             // The alarm can only trigger up to 2^32 - 1 ticks in the future.
             // So, if `instant` is more than 2^32 - 2 in the future, we use `max_instant` instead.
             let max_instant = self.now() + 0xFFFF_FFFE.micros();
@@ -650,7 +640,7 @@ pub mod monotonic {
         }
 
         fn zero() -> Self::Instant {
-            MonotonicInstant::from_ticks(0)
+            Instant::from_ticks(0)
         }
 
         unsafe fn reset(&mut self) {}
