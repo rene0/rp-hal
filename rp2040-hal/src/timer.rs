@@ -9,7 +9,7 @@
 //! See [Chapter 4 Section 6](https://datasheets.raspberrypi.org/rp2040/rp2040-datasheet.pdf) of the datasheet for more details.
 
 use core::sync::atomic::{AtomicU8, Ordering};
-use fugit::{MicrosDurationU32, MicrosDurationU64, WrappingTimerInstantU64};
+use fugit::{MicrosDurationU32, MicrosDurationU64};
 
 use crate::{
     atomic_register_access::{write_bitmask_clear, write_bitmask_set},
@@ -19,12 +19,8 @@ use crate::{
     typelevel::Sealed,
 };
 
-/// Legacy name for backwards compatibility
-#[deprecated(note = "please use WrappingInstant instead")]
-pub type Instant = WrappingInstant;
-
-/// Instant type used by the Timer & Alarm methods.
-pub type WrappingInstant = WrappingTimerInstantU64<1_000_000>;
+/// placeholder
+pub type Instant = MonotonicInstant;
 
 use fugit::MonotonicTimerInstantU64;
 /// Monotonic instant type used by the Timer & Alarm methods.
@@ -89,8 +85,8 @@ impl Timer {
     }
 
     /// Get the current counter value.
-    pub fn get_counter(&self) -> WrappingInstant {
-        WrappingTimerInstantU64::from_ticks(get_timestamp())
+    pub fn get_counter(&self) -> MonotonicInstant {
+        MonotonicTimerInstantU64::from_ticks(get_timestamp())
     }
 
     /// Get the value of the least significant word of the counter.
@@ -307,13 +303,7 @@ pub trait Alarm: Sealed {
     /// `u32::MAX` microseconds.
     ///
     /// [enable_interrupt]: #method.enable_interrupt
-    fn schedule_at(&mut self, timestamp: WrappingInstant) -> Result<(), ScheduleAlarmError>;
-
-    /// Like `schedule_at()` but for monotonic instants.
-    fn schedule_at_monotonic(
-        &mut self,
-        timestamp: MonotonicInstant,
-    ) -> Result<(), ScheduleAlarmError>;
+    fn schedule_at(&mut self, timestamp: MonotonicInstant) -> Result<(), ScheduleAlarmError>;
 
     /// Return true if this alarm is finished. The returned value is undefined if the alarm
     /// has not been scheduled yet.
@@ -329,42 +319,6 @@ macro_rules! impl_alarm {
         pub struct $name(Timer);
         impl $name {
             fn schedule_internal(
-                &mut self,
-                timestamp: WrappingInstant,
-            ) -> Result<(), ScheduleAlarmError> {
-                let timestamp_low = (timestamp.as_ticks() & 0xFFFF_FFFF) as u32;
-                // Safety: Only used to access bits belonging exclusively to this alarm
-                let timer = unsafe { &*pac::TIMER::PTR };
-
-                // This lock is for time-criticality
-                cortex_m::interrupt::free(|_| {
-                    let alarm = &timer.$timer_alarm();
-
-                    // safety: This is the only code in the codebase that accesses memory address $timer_alarm
-                    alarm.write(|w| unsafe { w.bits(timestamp_low) });
-
-                    // If it is not set, it has already triggered.
-                    let now = self.0.get_counter();
-                    if now.is_after(timestamp)
-                        && (timer.armed().read().bits() & $armed_bit_mask) != 0
-                    {
-                        // timestamp was set to a value in the past
-
-                        // safety: TIMER.armed is a write-clear register, and there can only be
-                        // 1 instance of AlarmN so we can safely atomically clear this bit.
-                        unsafe {
-                            timer.armed().write_with_zero(|w| w.bits($armed_bit_mask));
-                            crate::atomic_register_access::write_bitmask_set(
-                                timer.intf().as_ptr(),
-                                $armed_bit_mask,
-                            );
-                        }
-                    }
-                    Ok(())
-                })
-            }
-
-            fn schedule_internal_monotonic(
                 &mut self,
                 timestamp: MonotonicInstant,
             ) -> Result<(), ScheduleAlarmError> {
@@ -474,20 +428,6 @@ macro_rules! impl_alarm {
             /// [enable_interrupt]: #method.enable_interrupt
             fn schedule_at(
                 &mut self,
-                timestamp: WrappingInstant,
-            ) -> Result<(), ScheduleAlarmError> {
-                let now = self.0.get_counter();
-                let duration = timestamp.as_ticks().saturating_sub(now.as_ticks());
-                if duration > u32::MAX.into() {
-                    return Err(ScheduleAlarmError::AlarmTooLate);
-                }
-
-                self.schedule_internal(timestamp)
-            }
-
-            /// Like `schedule_at()` but for monotonic instants.
-            fn schedule_at_monotonic(
-                &mut self,
                 timestamp: MonotonicInstant,
             ) -> Result<(), ScheduleAlarmError> {
                 let now = MonotonicInstant::from_ticks(get_timestamp());
@@ -496,7 +436,7 @@ macro_rules! impl_alarm {
                     return Err(ScheduleAlarmError::AlarmTooLate);
                 }
 
-                self.schedule_internal_monotonic(timestamp)
+                self.schedule_internal(timestamp)
             }
 
             /// Return true if this alarm is finished. The returned value is undefined if the alarm
@@ -600,7 +540,7 @@ pub mod monotonic {
             let wake_at = core::cmp::min(instant, max_instant);
 
             // Cannot fail
-            let _ = self.1.schedule_at_monotonic(wake_at);
+            let _ = self.1.schedule_at(wake_at);
             self.1.enable_interrupt();
         }
 
