@@ -26,10 +26,8 @@ pub type Instant = WrappingInstant;
 /// Instant type used by the Timer & Alarm methods.
 pub type WrappingInstant = WrappingTimerInstantU64<1_000_000>;
 
-#[cfg(feature = "rtic-monotonic")]
 use fugit::MonotonicTimerInstantU64;
 /// Monotonic instant type used by the Timer & Alarm methods.
-#[cfg(feature = "rtic-monotonic")]
 pub type MonotonicInstant = MonotonicTimerInstantU64<1_000_000>;
 
 static ALARMS_TIMER0: AtomicU8 = AtomicU8::new(0x00);
@@ -392,7 +390,6 @@ pub trait Alarm: Sealed {
     fn schedule(&mut self, countdown: MicrosDurationU32) -> Result<(), ScheduleAlarmError>;
 
     /// Like `schedule_at()` but for monotonic instants.
-    #[cfg(feature = "rtic-monotonic")]
     fn schedule_at_monotonic(
         &mut self,
         timestamp: MonotonicInstant,
@@ -460,7 +457,6 @@ macro_rules! impl_alarm {
                 })
             }
 
-            #[cfg(feature = "rtic-monotonic")]
             fn schedule_internal_monotonic(
                 &mut self,
                 timestamp: MonotonicInstant,
@@ -585,7 +581,6 @@ macro_rules! impl_alarm {
             }
 
             /// Like `schedule_at()` but for monotonic instants.
-            #[cfg(feature = "rtic-monotonic")]
             fn schedule_at_monotonic(
                 &mut self,
                 timestamp: MonotonicInstant,
@@ -675,7 +670,6 @@ impl_alarm!(Alarm3 {
 });
 
 /// Support for RTIC monotonic trait.
-#[cfg(feature = "rtic-monotonic")]
 pub mod monotonic {
     use super::{get_timestamp, Alarm, MonotonicInstant, Timer, TimerDevice};
     use fugit::ExtU32;

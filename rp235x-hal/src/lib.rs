@@ -17,8 +17,6 @@
 //!   Memoize(cache) ROM function pointers on first use to improve performance
 //! * **rt** -
 //!   Minimal startup / runtime for Cortex-M microcontrollers
-//! * **rtic-monotonic** -
-//!   Implement `rtic_monotonic::Monotonic` based on the RP2350 timer peripheral
 //! * **i2c-write-iter** -
 //!   Implement `i2c_write_iter` traits for `I2C<_, _, Controller>`.
 //! * **binary-info** -
