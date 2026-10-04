@@ -34,21 +34,6 @@ fn release_alarm(mask: u8, alarms: &'static AtomicU8) {
     alarms.fetch_and(!mask, Ordering::Relaxed);
 }
 
-fn get_timestamp<D: TimerDevice>() -> u64 {
-    // Safety: Only used for reading current timer value
-    let timer = D::get_perif();
-    let mut hi0 = timer.timerawh().read().bits();
-    let timestamp = loop {
-        let low = timer.timerawl().read().bits();
-        let hi1 = timer.timerawh().read().bits();
-        if hi0 == hi1 {
-            break (u64::from(hi0) << 32) | u64::from(low);
-        }
-        hi0 = hi1;
-    };
-    timestamp
-}
-
 /// Represents Timer0
 ///
 /// But unlike the PAC object, we can copy this one when we duplicate the timer.
@@ -158,7 +143,18 @@ where
 {
     /// Get the current counter value.
     pub fn get_counter(&self) -> Instant {
-        MonotonicTimerInstantU64::from_ticks(get_timestamp::<D>())
+        // Safety: Only used for reading current timer value
+        let timer = D::get_perif();
+        let mut hi0 = timer.timerawh().read().bits();
+        let timestamp = loop {
+            let low = timer.timerawl().read().bits();
+            let hi1 = timer.timerawh().read().bits();
+            if hi0 == hi1 {
+                break (u64::from(hi0) << 32) | u64::from(low);
+            }
+            hi0 = hi1;
+        };
+        MonotonicTimerInstantU64::from_ticks(timestamp)
     }
 
     /// Get the value of the least significant word of the counter.
@@ -420,7 +416,7 @@ macro_rules! impl_alarm {
                     alarm.write(|w| unsafe { w.bits(timestamp_low) });
 
                     // If it is not set, it has already triggered.
-                    let now = Instant::from_ticks(get_timestamp::<D>());
+                    let now = self.0.get_counter();
                     if now > timestamp && (timer.armed().read().bits() & $armed_bit_mask) != 0 {
                         // timestamp was set to a value in the past
 
@@ -516,7 +512,7 @@ macro_rules! impl_alarm {
             ///
             /// [enable_interrupt]: #method.enable_interrupt
             fn schedule_at(&mut self, timestamp: Instant) -> Result<(), ScheduleAlarmError> {
-                let now = Instant::from_ticks(get_timestamp::<D>());
+                let now = self.0.get_counter();
                 let duration = timestamp.as_ticks().saturating_sub(now.as_ticks());
                 if duration > u32::MAX.into() {
                     return Err(ScheduleAlarmError::AlarmTooLate);
@@ -602,7 +598,7 @@ impl_alarm!(Alarm3 {
 
 /// Support for RTIC monotonic trait.
 pub mod monotonic {
-    use super::{get_timestamp, Alarm, Instant, Timer, TimerDevice};
+    use super::{Alarm, Instant, Timer, TimerDevice};
     use fugit::ExtU32;
 
     /// RTIC Monotonic Implementation
@@ -621,13 +617,13 @@ pub mod monotonic {
         const DISABLE_INTERRUPT_ON_EMPTY_QUEUE: bool = false;
 
         fn now(&mut self) -> Instant {
-            Instant::from_ticks(get_timestamp::<D>())
+            self.0.get_counter()
         }
 
         fn set_compare(&mut self, instant: Instant) {
             // The alarm can only trigger up to 2^32 - 1 ticks in the future.
             // So, if `instant` is more than 2^32 - 2 in the future, we use `max_instant` instead.
-            let max_instant = self.now() + 0xFFFF_FFFE.micros();
+            let max_instant = self.0.get_counter() + 0xFFFF_FFFE.micros();
             let wake_at = core::cmp::min(instant, max_instant);
 
             // Cannot fail
